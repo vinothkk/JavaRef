@@ -1,0 +1,417 @@
+Great question!
+
+---
+
+### 🔍 What is AOP in Spring?
+
+**AOP (Aspect-Oriented Programming)** is a programming paradigm in Spring that allows you to **separate cross-cutting concerns** (like logging, security, performance monitoring) from the business logic.
+
+In simpler terms:
+> AOP lets you inject behavior **before**, **after**, or **around** method executions — without modifying the actual code of those methods.
+
+---
+
+### 📌 Common Use Cases of AOP
+
+- Logging method execution time
+- Security checks
+- Transactions
+- Caching
+- Exception handling
+
+---
+
+### 📊 How to Use AOP to Monitor Service Methods / DB Calls
+
+You can use AOP to **log performance** for every method in your `@Service`, `@Repository`, or `@Controller`.
+
+---
+
+### ✅ Step-by-Step: Monitor Service Layer Using AOP
+
+#### 1. **Add Spring AOP Dependency**
+If you're using Spring Boot, this is usually already included. If not:
+
+```xml
+<!-- Maven -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-aop</artifactId>
+</dependency>
+```
+
+---
+
+#### 2. **Create a Performance Logging Aspect**
+
+```java
+@Aspect
+@Component
+public class PerformanceLoggingAspect {
+
+    private static final Logger logger = LoggerFactory.getLogger(PerformanceLoggingAspect.class);
+
+    @Around("execution(* com.yourcompany.yourproject.service..*(..))")
+    public Object logExecutionTime(ProceedingJoinPoint joinPoint) throws Throwable {
+        long start = System.currentTimeMillis();
+
+        Object proceed = joinPoint.proceed();  // Proceed with the method call
+
+        long executionTime = System.currentTimeMillis() - start;
+
+        logger.info("{} executed in {} ms", joinPoint.getSignature(), executionTime);
+
+        return proceed;
+    }
+}
+```
+
+---
+
+#### 3. **Enable AspectJ Support**
+Spring Boot does this by default if the AOP dependency is present. But if needed explicitly:
+
+```java
+@EnableAspectJAutoProxy
+@Configuration
+public class AppConfig {
+}
+```
+
+---
+
+#### 4. **Watch Logs**
+Now every method inside the `com.yourcompany.yourproject.service` package (and its sub-packages) will have its execution time logged automatically.
+
+Example log:
+```
+INFO  - void com.example.service.UserService.getUsers() executed in 120 ms
+```
+
+---
+
+### 🏛️ You Can Also Monitor Database Calls
+
+If your DB logic is inside your `@Repository` or called from `@Service`, the same AOP advice can monitor it.
+
+But if you want to **monitor specific JDBC queries**, it’s better to wrap those calls directly or use **Spring Data JPA's interceptors** or **datasource proxy** tools like:
+
+- [P6Spy](https://github.com/p6spy/p6spy)
+- [Datasource-Proxy](https://github.com/gavlyukovskiy/spring-boot-data-source-decorator)
+
+These tools allow SQL query monitoring including:
+- Execution time
+- Query text
+- Parameters passed
+
+---
+
+### 🛠 Example: P6Spy Integration
+
+Add the dependency:
+
+```xml
+<dependency>
+    <groupId>p6spy</groupId>
+    <artifactId>p6spy</artifactId>
+    <version>3.9.1</version>
+</dependency>
+```
+
+In `application.properties`:
+
+```properties
+spring.datasource.driver-class-name=com.p6spy.engine.spy.P6SpyDriver
+spring.datasource.url=jdbc:p6spy:databricks://...
+```
+
+You’ll start seeing logs like:
+
+```
+P6Spy - 145ms - SELECT * FROM my_table
+```
+
+---
+
+### ✅ Summary
+
+| Concern                        | Solution             |
+|-------------------------------|----------------------|
+| Monitor service method time   | Spring AOP           |
+| Monitor SQL query execution   | P6Spy / JDBC wrapper |
+| Custom profiling              | Manual timing        |
+
+---
+
+Would you like a ready-to-use example with both AOP and P6Spy integrated into a Spring Boot project?/
+
+To measure API performance at the service level in a Java Spring Boot application — particularly focusing on:
+
+1. **Databricks query execution time**  
+2. **Time taken to transfer data from Databricks to Java (network latency)**  
+3. **Time taken for logical processing after the data is received**  
+
+—you can use manual timestamp logging with `System.nanoTime()` or `System.currentTimeMillis()`, or use a proper **performance profiling/logging tool**. Below is a complete example with explanations.
+
+---
+
+### ✅ 1. **Measure Databricks Query Execution Time**
+
+Use a `StopWatch` or manually capture timestamps before and after executing the JDBC query.
+
+```java
+long queryStartTime = System.currentTimeMillis();
+
+ResultSet resultSet = statement.executeQuery("SELECT * FROM my_table");
+
+long queryEndTime = System.currentTimeMillis();
+long queryExecutionTime = queryEndTime - queryStartTime;
+System.out.println("Query Execution Time (ms): " + queryExecutionTime);
+```
+
+This measures how long Databricks takes to process and return the result.
+
+---
+
+### ✅ 2. **Measure Data Transfer Time from Databricks to Java**
+
+If the query returns a large dataset, data transfer time can be significant. You can measure the time it takes to **fully read** the result set:
+
+```java
+long dataTransferStartTime = System.currentTimeMillis();
+
+List<MyData> dataList = new ArrayList<>();
+while (resultSet.next()) {
+    MyData data = new MyData();
+    data.setField1(resultSet.getString("field1"));
+    data.setField2(resultSet.getInt("field2"));
+    // ... populate fields
+    dataList.add(data);
+}
+
+long dataTransferEndTime = System.currentTimeMillis();
+long dataTransferTime = dataTransferEndTime - dataTransferStartTime;
+System.out.println("Data Transfer Time (ms): " + dataTransferTime);
+```
+
+---
+
+### ✅ 3. **Measure Logical Business Logic/Calculation Time**
+
+After retrieving and mapping the data, if you do additional logic:
+
+```java
+long logicStartTime = System.currentTimeMillis();
+
+// Sample logical processing
+List<MyProcessedData> processedList = processData(dataList);
+
+long logicEndTime = System.currentTimeMillis();
+long logicTime = logicEndTime - logicStartTime;
+System.out.println("Business Logic Processing Time (ms): " + logicTime);
+```
+
+---
+
+### 🔁 Full Example Inside a Spring Boot Service
+
+```java
+public List<MyProcessedData> getDataFromDatabricks() throws SQLException {
+    long totalStart = System.currentTimeMillis();
+
+    Connection connection = DriverManager.getConnection(DB_URL, USER, PASSWORD);
+    Statement statement = connection.createStatement();
+
+    long queryStart = System.currentTimeMillis();
+    ResultSet resultSet = statement.executeQuery("SELECT * FROM my_table");
+    long queryEnd = System.currentTimeMillis();
+    System.out.println("Query Execution Time: " + (queryEnd - queryStart) + " ms");
+
+    long transferStart = System.currentTimeMillis();
+    List<MyData> dataList = new ArrayList<>();
+    while (resultSet.next()) {
+        MyData data = new MyData();
+        // populate fields
+        dataList.add(data);
+    }
+    long transferEnd = System.currentTimeMillis();
+    System.out.println("Data Transfer Time: " + (transferEnd - transferStart) + " ms");
+
+    long logicStart = System.currentTimeMillis();
+    List<MyProcessedData> processedData = processData(dataList);
+    long logicEnd = System.currentTimeMillis();
+    System.out.println("Logical Processing Time: " + (logicEnd - logicStart) + " ms");
+
+    long totalEnd = System.currentTimeMillis();
+    System.out.println("Total End-to-End Time: " + (totalEnd - totalStart) + " ms");
+
+    return processedData;
+}
+```
+
+---
+
+### 🛠️ Optional: Use Spring `StopWatch` for Clean Code
+
+```java
+StopWatch stopWatch = new StopWatch();
+stopWatch.start("JDBC Query");
+ResultSet rs = statement.executeQuery("SELECT * FROM my_table");
+stopWatch.stop();
+
+stopWatch.start("Data Mapping");
+while (rs.next()) { /* mapping */ }
+stopWatch.stop();
+
+stopWatch.start("Logic");
+processData(...);
+stopWatch.stop();
+
+System.out.println(stopWatch.prettyPrint());
+```
+
+---
+
+### 🧪 Pro Tip: Use AOP or Interceptors for Global Performance Logs
+
+You can use Spring AOP to automatically log time taken by service methods or database calls.
+
+---
+
+Would you like a custom AOP-based solution or actuator-based monitoring for this setup?
+\
+
+To measure API performance at the service level in a Java Spring Boot application — particularly focusing on:
+
+1. **Databricks query execution time**  
+2. **Time taken to transfer data from Databricks to Java (network latency)**  
+3. **Time taken for logical processing after the data is received**  
+
+—you can use manual timestamp logging with `System.nanoTime()` or `System.currentTimeMillis()`, or use a proper **performance profiling/logging tool**. Below is a complete example with explanations.
+
+---
+
+### ✅ 1. **Measure Databricks Query Execution Time**
+
+Use a `StopWatch` or manually capture timestamps before and after executing the JDBC query.
+
+```java
+long queryStartTime = System.currentTimeMillis();
+
+ResultSet resultSet = statement.executeQuery("SELECT * FROM my_table");
+
+long queryEndTime = System.currentTimeMillis();
+long queryExecutionTime = queryEndTime - queryStartTime;
+System.out.println("Query Execution Time (ms): " + queryExecutionTime);
+```
+
+This measures how long Databricks takes to process and return the result.
+
+---
+
+### ✅ 2. **Measure Data Transfer Time from Databricks to Java**
+
+If the query returns a large dataset, data transfer time can be significant. You can measure the time it takes to **fully read** the result set:
+
+```java
+long dataTransferStartTime = System.currentTimeMillis();
+
+List<MyData> dataList = new ArrayList<>();
+while (resultSet.next()) {
+    MyData data = new MyData();
+    data.setField1(resultSet.getString("field1"));
+    data.setField2(resultSet.getInt("field2"));
+    // ... populate fields
+    dataList.add(data);
+}
+
+long dataTransferEndTime = System.currentTimeMillis();
+long dataTransferTime = dataTransferEndTime - dataTransferStartTime;
+System.out.println("Data Transfer Time (ms): " + dataTransferTime);
+```
+
+---
+
+### ✅ 3. **Measure Logical Business Logic/Calculation Time**
+
+After retrieving and mapping the data, if you do additional logic:
+
+```java
+long logicStartTime = System.currentTimeMillis();
+
+// Sample logical processing
+List<MyProcessedData> processedList = processData(dataList);
+
+long logicEndTime = System.currentTimeMillis();
+long logicTime = logicEndTime - logicStartTime;
+System.out.println("Business Logic Processing Time (ms): " + logicTime);
+```
+
+---
+
+### 🔁 Full Example Inside a Spring Boot Service
+
+```java
+public List<MyProcessedData> getDataFromDatabricks() throws SQLException {
+    long totalStart = System.currentTimeMillis();
+
+    Connection connection = DriverManager.getConnection(DB_URL, USER, PASSWORD);
+    Statement statement = connection.createStatement();
+
+    long queryStart = System.currentTimeMillis();
+    ResultSet resultSet = statement.executeQuery("SELECT * FROM my_table");
+    long queryEnd = System.currentTimeMillis();
+    System.out.println("Query Execution Time: " + (queryEnd - queryStart) + " ms");
+
+    long transferStart = System.currentTimeMillis();
+    List<MyData> dataList = new ArrayList<>();
+    while (resultSet.next()) {
+        MyData data = new MyData();
+        // populate fields
+        dataList.add(data);
+    }
+    long transferEnd = System.currentTimeMillis();
+    System.out.println("Data Transfer Time: " + (transferEnd - transferStart) + " ms");
+
+    long logicStart = System.currentTimeMillis();
+    List<MyProcessedData> processedData = processData(dataList);
+    long logicEnd = System.currentTimeMillis();
+    System.out.println("Logical Processing Time: " + (logicEnd - logicStart) + " ms");
+
+    long totalEnd = System.currentTimeMillis();
+    System.out.println("Total End-to-End Time: " + (totalEnd - totalStart) + " ms");
+
+    return processedData;
+}
+```
+
+---
+
+### 🛠️ Optional: Use Spring `StopWatch` for Clean Code
+
+```java
+StopWatch stopWatch = new StopWatch();
+stopWatch.start("JDBC Query");
+ResultSet rs = statement.executeQuery("SELECT * FROM my_table");
+stopWatch.stop();
+
+stopWatch.start("Data Mapping");
+while (rs.next()) { /* mapping */ }
+stopWatch.stop();
+
+stopWatch.start("Logic");
+processData(...);
+stopWatch.stop();
+
+System.out.println(stopWatch.prettyPrint());
+```
+
+---
+
+### 🧪 Pro Tip: Use AOP or Interceptors for Global Performance Logs
+
+You can use Spring AOP to automatically log time taken by service methods or database calls.
+
+---
+
+Would you like a custom AOP-based solution or actuator-based monitoring for this setup?

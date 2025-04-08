@@ -1,0 +1,227 @@
+
+for (PipelineLineDetailDTO1 pipelineDetailDTO1 : fullResponse) {
+    clientData.clear();
+    if (pipelineDetailDTO1.getDefaultPercentageData() != null) {
+        String dbResponse = "{" + pipelineDetailDTO1.getDefaultPercentageData() + "}";
+        Map<String, Integer> parseData = objectMapper.readValue(dbResponse, Map.class);
+        clientData.putAll(parseData);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MMM-yy", Locale.ENGLISH);
+        formattedProbabilith = clientData.entrySet()
+            .stream()
+            .sorted(Comparator.comparing(entry -> YearMonth.parse(entry.getKey(), formatter)))
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                Map.Entry::getValue,
+                (e1, e2) -> e1,
+                LinkedHashMap::new
+            ));
+        pipelineDetailDTO1.setPercentageData(formattedProbabilith);
+    }
+    pipelineLineDetailDTO1.add(pipelineDetailDTO1);
+    annualizedRevenue = annualizedRevenue.add(new BigDecimal(pipelineDetailDTO1.getTotalProjectedAnnualizedRevenue()));
+    weightedRevenue = weightedRevenue.add(new BigDecimal(pipelineDetailDTO1.getProjectedWeightedRevenue()));
+    probabilityAVG = probabilityAVG.add(new BigDecimal(pipelineDetailDTO1.getProbability()));
+}
+
+Extracted Method:
+
+private void processPipelineDetail(
+    PipelineLineDetailDTO1 pipelineDetailDTO1,
+    List<PipelineLineDetailDTO1> pipelineLineDetailDTO1List,
+    ObjectMapper objectMapper,
+    Map<String, Integer> clientData,
+    AtomicReference<BigDecimal> annualizedRevenue,
+    AtomicReference<BigDecimal> weightedRevenue,
+    AtomicReference<BigDecimal> probabilityAVG
+) throws IOException {
+    clientData.clear();
+    if (pipelineDetailDTO1.getDefaultPercentageData() != null) {
+        String dbResponse = "{" + pipelineDetailDTO1.getDefaultPercentageData() + "}";
+        Map<String, Integer> parseData = objectMapper.readValue(dbResponse, Map.class);
+        clientData.putAll(parseData);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MMM-yy", Locale.ENGLISH);
+        Map<String, Integer> formattedProbabilith = clientData.entrySet()
+            .stream()
+            .sorted(Comparator.comparing(entry -> YearMonth.parse(entry.getKey(), formatter)))
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                Map.Entry::getValue,
+                (e1, e2) -> e1,
+                LinkedHashMap::new
+            ));
+
+        pipelineDetailDTO1.setPercentageData(formattedProbabilith);
+    }
+
+    pipelineLineDetailDTO1List.add(pipelineDetailDTO1);
+    annualizedRevenue.set(annualizedRevenue.get().add(new BigDecimal(pipelineDetailDTO1.getTotalProjectedAnnualizedRevenue())));
+    weightedRevenue.set(weightedRevenue.get().add(new BigDecimal(pipelineDetailDTO1.getProjectedWeightedRevenue())));
+    probabilityAVG.set(probabilityAVG.get().add(new BigDecimal(pipelineDetailDTO1.getProbability())));
+}
+
+Updated for loop call:
+
+AtomicReference<BigDecimal> annualizedRevenue = new AtomicReference<>(BigDecimal.ZERO);
+AtomicReference<BigDecimal> weightedRevenue = new AtomicReference<>(BigDecimal.ZERO);
+AtomicReference<BigDecimal> probabilityAVG = new AtomicReference<>(BigDecimal.ZERO);
+
+for (PipelineLineDetailDTO1 pipelineDetailDTO1 : fullResponse) {
+    processPipelineDetail(
+        pipelineDetailDTO1,
+        pipelineLineDetailDTO1,
+        objectMapper,
+        clientData,
+        annualizedRevenue,
+        weightedRevenue,
+        probabilityAVG
+    );
+}
+
+Let me know if you want this cleaned into a single Java class with proper context or explanation added as Javadoc.
+You said:
+can  you tell me what is the AtomicReference here ?
+ChatGPT said:
+
+Absolutely!
+🔍 What is AtomicReference in Java?
+
+AtomicReference<T> is a class from the java.util.concurrent.atomic package that allows you to safely share and update object references between threads without using synchronization (like synchronized blocks).
+
+But in your single-threaded case, it's not for thread safety—it's a workaround to allow mutable state inside lambda expressions or methods when passing objects "by reference."
+✅ Why use AtomicReference<BigDecimal> in your case?
+
+In Java, method parameters are passed by value. So, if you pass a BigDecimal to a method and try to update it inside the method, the change won't be reflected outside.
+
+But you want the updated value of annualizedRevenue, weightedRevenue, and probabilityAVG to be available outside the processPipelineDetail(...) method after updating inside it.
+
+Since BigDecimal is immutable, the usual code like this:
+
+annualizedRevenue = annualizedRevenue.add(new BigDecimal(...));
+
+doesn’t modify the original variable—it returns a new object.
+
+To get around this, you wrap the value in AtomicReference<BigDecimal>, which acts like a mutable container:
+Example:
+
+AtomicReference<BigDecimal> ref = new AtomicReference<>(BigDecimal.ZERO);
+
+// Later in a method
+ref.set(ref.get().add(BigDecimal.valueOf(100)));
+
+Now the original ref will be updated.
+🔁 Without AtomicReference (won’t work):
+
+void myMethod(BigDecimal total) {
+    total = total.add(BigDecimal.ONE); // this won't affect the original total
+}
+
+✅ With AtomicReference:
+
+void myMethod(AtomicReference<BigDecimal> total) {
+    total.set(total.get().add(BigDecimal.ONE)); // this will update the original reference
+}
+
+TL;DR
+
+    AtomicReference is used here as a mutable wrapper for BigDecimal.
+
+    It lets you modify values inside a method and reflect those changes outside.
+
+    Perfect for cases where you're trying to simulate pass-by-reference behavior for immutable types like BigDecimal.
+
+Let me know if you'd like to see an alternate way to achieve the same result without using AtomicReference.
+You said:
+is there any other way we can implement this 
+ChatGPT said:
+
+Yes! You don’t necessarily need to use AtomicReference if you're not dealing with concurrency. There are a couple of cleaner and more common ways to handle this in typical Java apps:
+✅ Option 1: Return a Wrapper Object (POJO)
+
+You can create a simple data holder class to hold your BigDecimal totals and return it after processing.
+📦 Example: TotalsWrapper
+
+public class TotalsWrapper {
+    private BigDecimal annualizedRevenue = BigDecimal.ZERO;
+    private BigDecimal weightedRevenue = BigDecimal.ZERO;
+    private BigDecimal probabilityAVG = BigDecimal.ZERO;
+
+    // Getters & setters
+}
+
+🧠 Use it in your method:
+
+private TotalsWrapper processPipelineDetail(
+    PipelineLineDetailDTO1 pipelineDetailDTO1,
+    ObjectMapper objectMapper,
+    Map<String, Integer> clientData
+) throws IOException {
+    TotalsWrapper totals = new TotalsWrapper();
+
+    clientData.clear();
+    if (pipelineDetailDTO1.getDefaultPercentageData() != null) {
+        String dbResponse = "{" + pipelineDetailDTO1.getDefaultPercentageData() + "}";
+        Map<String, Integer> parseData = objectMapper.readValue(dbResponse, Map.class);
+        clientData.putAll(parseData);
+
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MMM-yy", Locale.ENGLISH);
+        Map<String, Integer> formattedProbabilith = clientData.entrySet()
+            .stream()
+            .sorted(Comparator.comparing(entry -> YearMonth.parse(entry.getKey(), formatter)))
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                Map.Entry::getValue,
+                (e1, e2) -> e1,
+                LinkedHashMap::new
+            ));
+
+        pipelineDetailDTO1.setPercentageData(formattedProbabilith);
+    }
+
+    totals.setAnnualizedRevenue(new BigDecimal(pipelineDetailDTO1.getTotalProjectedAnnualizedRevenue()));
+    totals.setWeightedRevenue(new BigDecimal(pipelineDetailDTO1.getProjectedWeightedRevenue()));
+    totals.setProbabilityAVG(new BigDecimal(pipelineDetailDTO1.getProbability()));
+
+    return totals;
+}
+
+🔁 Then use it like this:
+
+BigDecimal annualizedRevenue = BigDecimal.ZERO;
+BigDecimal weightedRevenue = BigDecimal.ZERO;
+BigDecimal probabilityAVG = BigDecimal.ZERO;
+
+for (PipelineLineDetailDTO1 dto : fullResponse) {
+    TotalsWrapper result = processPipelineDetail(dto, objectMapper, clientData);
+
+    annualizedRevenue = annualizedRevenue.add(result.getAnnualizedRevenue());
+    weightedRevenue = weightedRevenue.add(result.getWeightedRevenue());
+    probabilityAVG = probabilityAVG.add(result.getProbabilityAVG());
+
+    pipelineLineDetailDTO1.add(dto);
+}
+
+✅ Option 2: Use arrays or holder objects (not recommended but possible)
+
+BigDecimal[] totals = new BigDecimal[] {
+    BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO
+};
+
+// In method, update: totals[0], totals[1], totals[2]
+
+This works but is less readable and error-prone compared to using a small POJO.
+✅ Option 3: Use a class-level field (if scope allows)
+
+If these values are always used inside the same service class, just define them as private fields, and update them inside the method directly.
+
+private BigDecimal annualizedRevenue = BigDecimal.ZERO;
+private BigDecimal weightedRevenue = BigDecimal.ZERO;
+private BigDecimal probabilityAVG = BigDecimal.ZERO;
+
+Then the method can update them freely. But this doesn’t scale well in multi-threaded services.
+✅ Summary
+Approach	Thread-Safe	Clean & Readable	Recommended?
+AtomicReference	✅ Yes	🤷 Medium	Only if needed
+Wrapper Class (TotalsWrapper)	❌ No	✅ High	✅ Best for clarity
+Array workaround	❌ No	❌ Low	❌ Avoid
+Class-level fields	❌ No	✅ Medium	⚠️ Only if scoped properly
