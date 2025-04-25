@@ -312,4 +312,142 @@ public class RepositoryResponseItemRowMapper implements RowMapper<RepositoryResp
         );
     }
 }
+import com.fasterxml.jackson.annotation.JsonProperty; // If using Jackson for repo response mapping
+import java.util.List;
+import java.util.Collections; // For empty list
+
+// --- Input Data Model ---
+// Represents one row from your repository response
+record RepositoryResponseItem(
+    @JsonProperty("parent_name") String parentName,
+    @JsonProperty("parent_id") String parentId,
+    @JsonProperty("mdm_client_gems_id") String mdmClientGemsId,
+    @JsonProperty("mdm_cust_gems_id") String mdmCustGemsId,
+    String segment, // Already correct naming convention
+    String region,  // Already correct naming convention
+    @JsonProperty("client_name") String clientName,
+    @JsonProperty("customer_name") String customerName,
+    @JsonProperty("alpha_Services_Parent_Count") String alphaServicesParentCount,
+    @JsonProperty("global_Markets_Client_Count") String globalMarketsClientCount,
+    // Add ALL other count fields from your input JSON here...
+    // It's important to include all fields you need for mapping
+    @JsonProperty("a_Platform_Parent_Count") String aPlatformParentCount,
+    @JsonProperty("back_Office_Parent_Count") String backOfficeParentCount,
+    @JsonProperty("custody_Parent_Count") String custodyParentCount,
+    @JsonProperty("digital_Parent_Count") String digitalParentCount,
+    @JsonProperty("global_Markets_Parent_Count") String globalMarketsParentCount,
+    @JsonProperty("middleOffice_Parent_Count") String middleOfficeParentCount, // Note: "middleOffice" vs "middle_Office" inconsistency in input? Standardize if possible. Assuming middleOffice based on target.
+    @JsonProperty("ssga_Parent_Count") String ssgaParentCount,
+    @JsonProperty("treasury_Parent_Count") String treasuryParentCount,
+
+    @JsonProperty("a_Platform_Client_Count") String aPlatformClientCount,
+    @JsonProperty("alpha_Services_Client_Count") String alphaServicesClientCount,
+    @JsonProperty("back_Office_Client_Count") String backOfficeClientCount,
+    @JsonProperty("custody_Client_Count") String custodyClientCount,
+    @JsonProperty("digital_Client_Count") String digitalClientCount,
+    // globalMarketsClientCount already defined
+    @JsonProperty("middleOffice_Client_Count") String middleOfficeClientCount,
+    @JsonProperty("ssga_Client_Count") String ssgaClientCount,
+    @JsonProperty("treasury_Client_Count") String treasuryClientCount,
+
+
+    @JsonProperty("a_Platform_Customer_Count") String aPlatformCustomerCount,
+    @JsonProperty("alpha_Services_Customer_Count") String alphaServicesCustomerCount,
+    @JsonProperty("back_Office_Customer_Count") String backOfficeCustomerCount,
+    @JsonProperty("custody_Customer_Count") String custodyCustomerCount,
+    @JsonProperty("digital_Customer_Count") String digitalCustomerCount,
+    @JsonProperty("global_Markets_Customer_Count") String globalMarketsCustomerCount,
+    @JsonProperty("middle_Office_Customer_Count") String middleOfficeCustomerCount, // Assuming this corresponds to "middleOffice" target
+    @JsonProperty("ssga_Customer_Count") String ssgaCustomerCount,
+    @JsonProperty("treasury_Customer_Count") String treasuryCustomerCount
+
+    // NOTE: Ensure all field names match your actual JSON keys from the repository.
+    // The @JsonProperty annotation helps if your Java field names differ from JSON keys.
+) {}
+
+
+// --- Output Data Models ---
+
+// Level 3: Customer
+record CustomerData(
+    String id,              // mdm_cust_gems_id
+    String parentId,        // mdm_client_gems_id (ID of the parent ClientData)
+    String name,            // customer_name
+    String type,            // "Customer"
+    String segment,         // Inherited from Parent
+    String region,          // Inherited from Parent
+    String platform,        // a_Platform_Customer_Count
+    String services,        // alpha_Services_Customer_Count
+    String backOffice,      // back_Office_Customer_Count
+    String custody,         // custody_Customer_Count
+    String digital,         // digital_Customer_Count
+    String globalMarkets,   // global_Markets_Customer_Count
+    String middleOffice,    // middle_Office_Customer_Count
+    String ssga,            // ssga_Customer_Count
+    String treasury,        // treasury_Customer_Count
+    List<Object> detailData // Always empty for now
+) {}
+
+// Level 2: Client
+record ClientData(
+    String id,              // mdm_client_gems_id
+    long parentId,          // parent_id (ID of the parent ParentData) - Assuming Parent ID becomes long
+    String name,            // client_name
+    String type,            // "Client"
+    String segment,         // Inherited from Parent
+    String region,          // Inherited from Parent
+    String platform,        // a_Platform_Client_Count (Note: a_Platform_Client_Count not in input example, add if needed)
+    String services,        // alpha_Services_Client_Count
+    String backOffice,      // back_Office_Client_Count
+    String custody,         // custody_Client_Count
+    String digital,         // digital_Client_Count
+    String globalMarkets,   // global_Markets_Client_Count
+    String middleOffice,    // middleOffice_Client_Count
+    String ssga,            // ssga_Client_Count
+    String treasury,        // treasury_Client_Count
+    List<CustomerData> subRows // Nested Customers
+) {}
+
+// Level 1: Parent
+record ParentData(
+    long id,                // parent_id (parsed as long)
+    String name,            // parent_name
+    String type,            // "Parent"
+    String segment,         // segment
+    String region,          // region
+    String platform,        // a_Platform_Parent_Count
+    String services,        // alpha_Services_Parent_Count
+    String backOffice,      // back_Office_Parent_Count
+    String custody,         // custody_Parent_Count
+    String digital,         // digital_Parent_Count
+    String globalMarkets,   // global_Markets_Parent_Count
+    String middleOffice,    // middleOffice_Parent_Count
+    String ssga,            // ssga_Parent_Count
+    String treasury,        // treasury_Parent_Count
+    List<ClientData> subRows // Nested Clients
+) {}
+
+    import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/hierarchy")
+public class HierarchyController {
+
+    @Autowired
+    private HierarchyService hierarchyService;
+
+    @Autowired // Assuming you have a repository bean
+    private YourRepository repository; // Replace with your actual repository
+
+    @GetMapping
+    public List<ParentData> getHierarchy() {
+        // In a real app, you might pass parameters to the repo
+        List<RepositoryResponseItem> flatData = repository.getFlatData(); 
+        return hierarchyService.buildHierarchy(flatData);
+    }
+}
 */
