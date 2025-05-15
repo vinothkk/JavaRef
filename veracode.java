@@ -51,3 +51,35 @@ private String applyInquiryDetailFilterLogicWithParams(GlobalFilterDTO globalFil
     // This is just a placeholder - you'll need to adapt your actual method
     return ""; // return the SQL with named parameters
 }
+
+private String applyGlobalFilterLogicWithParams(GlobalFilterDTO globalFilterDTO, Map<String, Object> paramMap) {
+    StringBuilder filterQuery = new StringBuilder();
+    
+    if (globalFilterDTO != null) {
+        // Handle client filter
+        if (globalFilterDTO.getClient() != null && !globalFilterDTO.getClient().isEmpty()) {
+            filterQuery.append(" and client_id in (:clientIds) ");
+            paramMap.put("clientIds", globalFilterDTO.getClient());
+        }
+        
+        // Handle region filter
+        if (globalFilterDTO.getRegion() != null && !globalFilterDTO.getRegion().isEmpty()) {
+            filterQuery.append(" and region in (:regions) ");
+            paramMap.put("regions", globalFilterDTO.getRegion());
+        }
+        
+        // Handle segment filter
+        if (globalFilterDTO.getSegment() != null && !globalFilterDTO.getSegment().isEmpty()) {
+            filterQuery.append(" and client_segment in (:segments) ");
+            paramMap.put("segments", globalFilterDTO.getSegment());
+        }
+        
+        // Handle country name filter
+        if (globalFilterDTO.getCountryName() != null && !globalFilterDTO.getCountryName().isEmpty()) {
+            filterQuery.append(" and country_name in (:countryNames) ");
+            paramMap.put("countryNames", globalFilterDTO.getCountryName());
+        }
+    }
+    
+    return filterQuery.toString();
+}
