@@ -83,3 +83,51 @@ private String applyGlobalFilterLogicWithParams(GlobalFilterDTO globalFilterDTO,
     
     return filterQuery.toString();
 }
+
+
+private String applyGlobalFilterLogicWithParams(GlobalFilterDTO globalFilterDTO, Map<String, Object> paramMap) {
+    StringBuilder filterQuery = new StringBuilder();
+    
+    if (globalFilterDTO != null) {
+        // Handle client filter
+        if (globalFilterDTO.getClient() != null && !globalFilterDTO.getClient().isEmpty()) {
+            filterQuery.append(" and client_id in (:clientIds) ");
+            paramMap.put("clientIds", globalFilterDTO.getClient());
+        }
+        
+        // Handle region filter
+        if (globalFilterDTO.getRegion() != null && !globalFilterDTO.getRegion().isEmpty()) {
+            filterQuery.append(" and region in (:regions) ");
+            paramMap.put("regions", globalFilterDTO.getRegion());
+        }
+        
+        // Handle segment filter
+        if (globalFilterDTO.getSegment() != null && !globalFilterDTO.getSegment().isEmpty()) {
+            filterQuery.append(" and client_segment in (:segments) ");
+            paramMap.put("segments", globalFilterDTO.getSegment());
+        }
+        
+        // Handle country name filter
+        if (globalFilterDTO.getCountryName() != null && !globalFilterDTO.getCountryName().isEmpty()) {
+            filterQuery.append(" and country_name in (:countryNames) ");
+            paramMap.put("countryNames", globalFilterDTO.getCountryName());
+        }
+        
+        // Handle date range filter
+        if (globalFilterDTO.getCreatedOn() != null && !globalFilterDTO.getCreatedOn().isEmpty() 
+                && globalFilterDTO.getCreatedOn().size() >= 2) {
+            String fromDate = globalFilterDTO.getCreatedOn().get(1);
+            String toDate = globalFilterDTO.getCreatedOn().get(0);
+            
+            if (fromDate != null && toDate != null) {
+                filterQuery.append(" and to_date(to_timestamp(CREATED_DATETIME,'MM/d/yyyy h:m a')) >= to_date(to_timestamp(:fromDate,'MM/d/yyyy h:m a')) ");
+                filterQuery.append(" and to_date(to_timestamp(CREATED_DATETIME,'MM/d/yyyy h:m a')) <= to_date(to_timestamp(:toDate,'MM/d/yyyy h:m a')) ");
+                
+                paramMap.put("fromDate", fromDate);
+                paramMap.put("toDate", toDate);
+            }
+        }
+    }
+    
+    return filterQuery.toString();
+}
