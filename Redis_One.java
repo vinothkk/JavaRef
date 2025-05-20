@@ -1,0 +1,219 @@
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-cache</artifactId>
+</dependency>
+
+# Redis Configuration
+spring.cache.type=redis
+spring.redis.host=${REDIS_HOST}
+spring.redis.port=6379
+spring.redis.ssl=false
+spring.redis.timeout=2000
+
+# Connection pool settings
+spring.redis.lettuce.pool.max-active=8
+spring.redis.lettuce.pool.max-idle=8
+spring.redis.lettuce.pool.min-idle=2
+spring.redis.lettuce.pool.max-wait=-1ms
+
+# TTL settings (optional)
+spring.cache.redis.time-to-live=3600000
+
+Create Redis configuration class:
+
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(60))
+            .serializeKeysWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(cacheConfig)
+            .build();
+    }
+}
+
+Implement caching in your service:
+@Service
+public class UserService {
+    
+    @Cacheable(value = "users", key = "#id")
+    public User getUserById(String id) {
+        // Method will be executed only if the result is not in the cache
+        return userRepository.findById(id);
+    }
+    
+    @CachePut(value = "users", key = "#user.id")
+    public User updateUser(User user) {
+        // Method always executes and its result is stored in the cache
+        return userRepository.save(user);
+    }
+    
+    @CacheEvict(value = "users", key = "#id")
+    public void deleteUser(String id) {
+        // Removes the cache entry
+        userRepository.deleteById(id);
+    }
+}
+
+if my payload is an object means then how to use the key in radis like {country:[], segment:[], regin:[]}
+
+1. Key Generation Strategies for Complex Objects
+Option 1: Custom Key Generator
+Create a custom key generator to handle your complex object structure:
+
+@Component
+public class CustomKeyGenerator implements KeyGenerator {
+    
+    @Override
+    public Object generate(Object target, Method method, Object... params) {
+        if (params.length == 0) {
+            return SimpleKey.EMPTY;
+        }
+        
+        // Assuming the first parameter is your filter object
+        if (params[0] instanceof FilterCriteria) {
+            FilterCriteria filter = (FilterCriteria) params[0];
+            
+            // Create a key based on the filter's properties
+            return new StringBuilder()
+                .append("data")
+                .append(":")
+                .append(StringUtils.collectionToDelimitedString(filter.getCountries(), "-"))
+                .append(":")
+                .append(StringUtils.collectionToDelimitedString(filter.getSegments(), "-"))
+                .append(":")
+                .append(StringUtils.collectionToDelimitedString(filter.getRegions(), "-"))
+                .toString();
+        }
+        
+        // Fallback to default key generation
+        return new SimpleKey(params);
+    }
+}
+
+2. Creating the Filter Criteria Class
+Define a proper class to represent your filter criteria:
+
+public class FilterCriteria {
+    private List<String> countries;
+    private List<String> segments;
+    private List<String> regions;
+    
+    // Constructors, getters, setters
+    
+    // Ensure proper equals and hashCode methods
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        FilterCriteria that = (FilterCriteria) o;
+        return Objects.equals(countries, that.countries) &&
+               Objects.equals(segments, that.segments) &&
+               Objects.equals(regions, that.regions);
+    }
+    
+    @Override
+    public int hashCode() {
+        return Objects.hash(countries, segments, regions);
+    }
+}
+
+3. Configuring Redis to Handle the Complex Keys
+Add this configuration to your Redis config class:
+
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    @Bean
+    public KeyGenerator customKeyGenerator() {
+        return new CustomKeyGenerator();
+    }
+    
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(30))
+            .serializeKeysWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(cacheConfig)
+            .build();
+    }
+}
+
+4. Using the Custom Key Generator in Your Service
+
+@Service
+public class DataService {
+    
+    // Using the custom key generator
+    @Cacheable(value = "dataCache", keyGenerator = "customKeyGenerator")
+    public List<Data> getData(FilterCriteria criteria) {
+        // Fetch and return data
+    }
+    
+    // Alternative: Using SpEL expression directly
+    @Cacheable(value = "dataCache", 
+               key = "'data:' + #criteria.countries + ':' + #criteria.segments + ':' + #criteria.regions")
+    public List<Data> getDataAlternative(FilterCriteria criteria) {
+        // Fetch and return data
+    }
+}
+5. Additional Best Practices for Complex Keys
+
+Consider key length and complexity:
+
+Redis keys can be any binary sequence, but keep them reasonably short
+Very long keys can impact memory usage and performance
+
+
+Handle empty collections:
+
+Decide how to represent empty arrays in your key (e.g., "EMPTY" or "_")
+Be consistent with your approach
+
+// Example handling for empty collections
+private String formatCollection(List<String> collection) {
+    if (collection == null || collection.isEmpty()) {
+        return "EMPTY";
+    }
+    return StringUtils.collectionToDelimitedString(collection, "-");
+}
+
+Implement cache key validation:
+
+Verify that generated keys conform to your naming conventions
+Log unusually long or problematic keys during development
+
+
+Consider using JSON for complex keys:
+
+For very complex filter objects, serialize to JSON
+Be aware this can create long keys
+
+@Cacheable(value = "dataCache", key = "#root.method.name + ':' + @objectMapper.writeValueAsString(#criteria)")
+public List<Data> getDataWithJsonKey(FilterCriteria criteria) {
+    // Method implementation
+}
+
+This approach gives you a robust system for handling complex objects as cache keys in Redis with Spring Boot, allowing you to effectively cache data based on multiple filter criteria.
