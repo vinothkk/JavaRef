@@ -1,3 +1,100 @@
+Fisrt issue solution for the above.
+========================================
+    // Option 1: Cache the data object instead of ResponseEntity
+@Service
+public class ProductServicesServiceImpl {
+
+    // Instead of caching the ResponseEntity, cache just the data
+    @Cacheable(value = "productServicesData", keyGenerator = "customKeyGenerator")
+    public List<ParentDataRecordDTO> getProductServicesData(GlobalFilterDTO globalFilterDTO) {
+        logger.info("ProductServicesServiceImpl: fetching product services data");
+        // Your logic to fetch the data
+        List<ParentDataRecordDTO> data = // fetch data
+        return data;
+    }
+
+    // Public API method that uses the cached data
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getProductServicesOptimization(
+            GlobalFilterDTO globalFilterDTO) {
+        
+        // Get the data from cached method
+        List<ParentDataRecordDTO> data = getProductServicesData(globalFilterDTO);
+        
+        // Create the ResponseEntity on the fly (this part won't be cached)
+        ResponseData<List<ParentDataRecordDTO>> responseData = new ResponseData<>();
+        responseData.setResponseCode("200");
+        responseData.setResponseMessage("SUCCESS");
+        responseData.setResponseBody(data);
+        
+        return ResponseEntity.ok(responseData);
+    }
+}
+
+// Option 2: Use a custom serializer/deserializer for ResponseEntity
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    @Bean
+    public KeyGenerator customKeyGenerator() {
+        return new CustomKeyGenerator();
+    }
+    
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        // Create a custom ObjectMapper with appropriate modules
+        ObjectMapper objectMapper = new ObjectMapper();
+        
+        // Register a module to handle ResponseEntity serialization
+        SimpleModule module = new SimpleModule();
+        module.addSerializer(ResponseEntity.class, new ResponseEntitySerializer());
+        module.addDeserializer(ResponseEntity.class, new ResponseEntityDeserializer());
+        objectMapper.registerModule(module);
+        
+        // Create Jackson2JsonRedisSerializer with custom ObjectMapper
+        Jackson2JsonRedisSerializer<Object> serializer = new Jackson2JsonRedisSerializer<>(Object.class);
+        serializer.setObjectMapper(objectMapper);
+        
+        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(30))
+            .serializeKeysWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(serializer));
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(cacheConfig)
+            .build();
+    }
+}
+
+// Custom serializer for ResponseEntity
+class ResponseEntitySerializer extends JsonSerializer<ResponseEntity<?>> {
+    @Override
+    public void serialize(ResponseEntity<?> value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+        gen.writeStartObject();
+        gen.writeNumberField("status", value.getStatusCodeValue());
+        gen.writeObjectField("headers", value.getHeaders());
+        gen.writeObjectField("body", value.getBody());
+        gen.writeEndObject();
+    }
+}
+
+// Custom deserializer for ResponseEntity
+class ResponseEntityDeserializer extends JsonDeserializer<ResponseEntity<?>> {
+    @Override
+    public ResponseEntity<?> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+        JsonNode node = p.getCodec().readTree(p);
+        int status = node.get("status").asInt();
+        HttpHeaders headers = ctxt.readValue(node.get("headers").traverse(p.getCodec()), HttpHeaders.class);
+        Object body = ctxt.readValue(node.get("body").traverse(p.getCodec()), Object.class);
+        
+        return ResponseEntity.status(status).headers(headers).body(body);
+    }
+}
+============================================================================================
 <dependency>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-data-redis</artifactId>
