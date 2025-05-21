@@ -1,3 +1,203 @@
+Second
+=============
+// SOLUTION 1: Extract caching logic to a separate service
+// =====================================================
+
+// Create a dedicated caching service
+@Service
+public class ProductDataCacheService {
+    
+    private static final Logger logger = LoggerFactory.getLogger(ProductDataCacheService.class);
+    
+    @Autowired
+    private ProductDataRepository repository; // Your actual data source
+    
+    @Cacheable(value = "productServicesData", keyGenerator = "customKeyGenerator")
+    public List<ParentDataRecordDTO> getProductServicesData(GlobalFilterDTO globalFilterDTO) {
+        logger.info("Cache MISS: Fetching product services data from source");
+        // Your logic to fetch data
+        return repository.fetchProductData(globalFilterDTO);
+    }
+}
+
+// Then in your main service
+@Service
+public class ProductServicesServiceImpl {
+    
+    private static final Logger logger = LoggerFactory.getLogger(ProductServicesServiceImpl.class);
+    
+    @Autowired
+    private ProductDataCacheService cacheService;
+    
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getProductServicesOptimization(
+            GlobalFilterDTO globalFilterDTO) {
+        
+        logger.info("ProductServicesServiceImpl: getProductServicesOptimization()");
+        
+        // Get the data from the dedicated cache service
+        List<ParentDataRecordDTO> data = cacheService.getProductServicesData(globalFilterDTO);
+        
+        ResponseData<List<ParentDataRecordDTO>> responseData = new ResponseData<>();
+        responseData.setResponseCode("200");
+        responseData.setResponseMessage("SUCCESS");
+        responseData.setResponseBody(data);
+        
+        return ResponseEntity.ok(responseData);
+    }
+}
+
+// SOLUTION 2: Use AspectJ mode instead of proxy mode
+// ===================================================
+
+// In your Spring Boot application main class
+@SpringBootApplication
+@EnableCaching(mode = AdviceMode.ASPECTJ) // Enable AspectJ mode
+public class YourApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(YourApplication.class, args);
+    }
+}
+
+// SOLUTION 3: Use CacheManager directly
+// =====================================
+
+@Service
+public class ProductServicesServiceImpl {
+    
+    private static final Logger logger = LoggerFactory.getLogger(ProductServicesServiceImpl.class);
+    
+    @Autowired
+    private CacheManager cacheManager;
+    
+    @Autowired
+    private ProductDataRepository repository; // Your actual data source
+    
+    public List<ParentDataRecordDTO> getProductServicesData(GlobalFilterDTO globalFilterDTO) {
+        // Generate cache key using same logic as your custom key generator
+        String cacheKey = generateCacheKey(globalFilterDTO);
+        
+        // Try to get from cache
+        Cache cache = cacheManager.getCache("productServicesData");
+        if (cache != null) {
+            Cache.ValueWrapper wrapper = cache.get(cacheKey);
+            if (wrapper != null) {
+                logger.info("Cache HIT for key: {}", cacheKey);
+                return (List<ParentDataRecordDTO>) wrapper.get();
+            }
+        }
+        
+        // Cache miss, fetch data
+        logger.info("Cache MISS for key: {}", cacheKey);
+        List<ParentDataRecordDTO> data = repository.fetchProductData(globalFilterDTO);
+        
+        // Store in cache
+        if (cache != null) {
+            cache.put(cacheKey, data);
+        }
+        
+        return data;
+    }
+    
+    private String generateCacheKey(GlobalFilterDTO filter) {
+        return new StringBuilder()
+            .append("data")
+            .append(":")
+            .append(StringUtils.collectionToDelimitedString(filter.getCountries(), "-"))
+            .append(":")
+            .append(StringUtils.collectionToDelimitedString(filter.getSegments(), "-"))
+            .append(":")
+            .append(StringUtils.collectionToDelimitedString(filter.getRegions(), "-"))
+            .toString();
+    }
+    
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getProductServicesOptimization(
+            GlobalFilterDTO globalFilterDTO) {
+        
+        List<ParentDataRecordDTO> data = getProductServicesData(globalFilterDTO);
+        
+        ResponseData<List<ParentDataRecordDTO>> responseData = new ResponseData<>();
+        responseData.setResponseCode("200");
+        responseData.setResponseMessage("SUCCESS");
+        responseData.setResponseBody(data);
+        
+        return ResponseEntity.ok(responseData);
+    }
+}
+
+// SOLUTION 4: Debug & Verify Redis Configuration
+// ==============================================
+
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    private static final Logger logger = LoggerFactory.getLogger(RedisConfig.class);
+    
+    @Value("${spring.redis.host:localhost}")
+    private String redisHost;
+    
+    @Value("${spring.redis.port:6379}")
+    private int redisPort;
+    
+    @Bean
+    public KeyGenerator customKeyGenerator() {
+        return new CustomKeyGenerator();
+    }
+    
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        logger.info("Configuring Redis connection to {}:{}", redisHost, redisPort);
+        
+        RedisStandaloneConfiguration redisConfig = new RedisStandaloneConfiguration();
+        redisConfig.setHostName(redisHost);
+        redisConfig.setPort(redisPort);
+        
+        return new LettuceConnectionFactory(redisConfig);
+    }
+    
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(30))
+            .serializeKeysWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        
+        // Log when cache manager is initialized
+        logger.info("Redis cache manager initialized with TTL: {} minutes", 30);
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(cacheConfig)
+            .build();
+    }
+    
+    // Test that Redis is actually working
+    @PostConstruct
+    public void testRedisConnection() {
+        try {
+            RedisConnection connection = redisConnectionFactory().getConnection();
+            String pong = new String(connection.ping());
+            logger.info("Redis connection test - response: {}", pong);
+            connection.close();
+        } catch (Exception e) {
+            logger.error("Failed to connect to Redis: {}", e.getMessage(), e);
+        }
+    }
+}
+
+// SOLUTION 5: Verify with debug logging
+// =====================================
+
+// Add this to your application.properties or application.yml
+/*
+# Enable caching debug logs
+logging.level.org.springframework.cache=TRACE
+logging.level.org.springframework.data.redis=DEBUG
+*/
+==========================================================================
 Fisrt issue solution for the above.
 ========================================
     // Option 1: Cache the data object instead of ResponseEntity
