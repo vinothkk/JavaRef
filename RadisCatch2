@@ -1,0 +1,264 @@
+// Updated Redis Configuration for Spring 3.0
+@Configuration
+@EnableCaching
+public class RedisConfig {
+    
+    @Bean
+    public KeyGenerator customKeyGenerator() {
+        return new CustomKeyGenerator();
+    }
+    
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        // Create custom ObjectMapper with ResponseEntity support
+        ObjectMapper objectMapper = createCustomObjectMapper();
+        
+        // Use the new constructor approach instead of deprecated setObjectMapper
+        GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer(objectMapper);
+        
+        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
+            .entryTtl(Duration.ofMinutes(30))
+            .serializeKeysWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(new StringRedisSerializer()))
+            .serializeValuesWith(RedisSerializationContext
+                .SerializationPair
+                .fromSerializer(serializer));
+        
+        return RedisCacheManager.builder(connectionFactory)
+            .cacheDefaults(cacheConfig)
+            .build();
+    }
+    
+    private ObjectMapper createCustomObjectMapper() {
+        ObjectMapper objectMapper = new ObjectMapper();
+        
+        // Configure ObjectMapper for better JSON handling
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        objectMapper.configure(JsonGenerator.Feature.IGNORE_UNKNOWN, true);
+        objectMapper.setVisibility(PropertyAccessor.ALL, JsonAutoDetect.Visibility.ANY);
+        
+        // Register custom module for ResponseEntity
+        SimpleModule responseEntityModule = new SimpleModule("ResponseEntityModule");
+        responseEntityModule.addSerializer(ResponseEntity.class, new ResponseEntitySerializer());
+        responseEntityModule.addDeserializer(ResponseEntity.class, new ResponseEntityDeserializer());
+        objectMapper.registerModule(responseEntityModule);
+        
+        // Enable default typing for polymorphic deserialization
+        objectMapper.activateDefaultTyping(
+            objectMapper.getPolymorphicTypeValidator(),
+            ObjectMapper.DefaultTyping.NON_FINAL,
+            JsonTypeInfo.As.PROPERTY
+        );
+        
+        return objectMapper;
+    }
+}
+
+// Custom ResponseEntity Serializer
+@Component
+public class ResponseEntitySerializer extends JsonSerializer<ResponseEntity<?>> {
+    
+    @Override
+    public void serialize(ResponseEntity<?> value, JsonGenerator gen, SerializerProvider serializers) 
+            throws IOException {
+        gen.writeStartObject();
+        gen.writeNumberField("statusCode", value.getStatusCode().value());
+        gen.writeObjectField("headers", value.getHeaders().toSingleValueMap());
+        gen.writeObjectField("body", value.getBody());
+        gen.writeEndObject();
+    }
+}
+
+// Custom ResponseEntity Deserializer
+@Component
+public class ResponseEntityDeserializer extends JsonDeserializer<ResponseEntity<?>> {
+    
+    @Override
+    public ResponseEntity<?> deserialize(JsonParser p, DeserializationContext ctxt) 
+            throws IOException {
+        JsonNode node = p.getCodec().readTree(p);
+        
+        int statusCode = node.get("statusCode").asInt();
+        
+        // Deserialize headers
+        HttpHeaders headers = new HttpHeaders();
+        JsonNode headersNode = node.get("headers");
+        if (headersNode != null && headersNode.isObject()) {
+            headersNode.fields().forEachRemaining(entry -> 
+                headers.add(entry.getKey(), entry.getValue().asText())
+            );
+        }
+        
+        // Deserialize body
+        Object body = null;
+        JsonNode bodyNode = node.get("body");
+        if (bodyNode != null && !bodyNode.isNull()) {
+            body = ctxt.readValue(bodyNode.traverse(p.getCodec()), Object.class);
+        }
+        
+        return ResponseEntity.status(statusCode).headers(headers).body(body);
+    }
+}
+
+// Service Implementation with Caching
+@Service
+public class ProductServicesServiceImpl {
+    
+    private static final Logger logger = LoggerFactory.getLogger(ProductServicesServiceImpl.class);
+    
+    // Option 1: Cache the ResponseEntity directly (now works with custom serializers)
+    @Cacheable(value = "productServicesOptimization", keyGenerator = "customKeyGenerator")
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getProductServicesOptimization(
+            GlobalFilterDTO globalFilterDTO) {
+        
+        logger.info("ProductServicesServiceImpl: getProductServicesOptimization() - CACHE MISS");
+        
+        // Your logic to fetch the data
+        List<ParentDataRecordDTO> data = fetchProductData(globalFilterDTO);
+        
+        // Create the ResponseEntity
+        ResponseData<List<ParentDataRecordDTO>> responseData = new ResponseData<>();
+        responseData.setResponseCode("200");
+        responseData.setResponseMessage("SUCCESS");
+        responseData.setResponseBody(data);
+        
+        return ResponseEntity.ok(responseData);
+    }
+    
+    // Option 2: Cache just the data (recommended approach)
+    @Cacheable(value = "productServicesData", keyGenerator = "customKeyGenerator")
+    public List<ParentDataRecordDTO> getProductServicesData(GlobalFilterDTO globalFilterDTO) {
+        logger.info("ProductServicesServiceImpl: getProductServicesData() - CACHE MISS");
+        return fetchProductData(globalFilterDTO);
+    }
+    
+    // Public method that uses cached data
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getProductServicesOptimizationV2(
+            GlobalFilterDTO globalFilterDTO) {
+        
+        logger.info("ProductServicesServiceImpl: getProductServicesOptimizationV2()");
+        
+        // Get data from cache
+        List<ParentDataRecordDTO> data = getProductServicesData(globalFilterDTO);
+        
+        // Build response
+        ResponseData<List<ParentDataRecordDTO>> responseData = new ResponseData<>();
+        responseData.setResponseCode("200");
+        responseData.setResponseMessage("SUCCESS");
+        responseData.setResponseBody(data);
+        
+        return ResponseEntity.ok(responseData);
+    }
+    
+    // Your actual data fetching logic
+    private List<ParentDataRecordDTO> fetchProductData(GlobalFilterDTO globalFilterDTO) {
+        // Replace this with your actual implementation
+        // This could be a database call, external API call, etc.
+        
+        logger.info("Fetching product data for filter: countries={}, segments={}, regions={}", 
+            globalFilterDTO.getCountries(), 
+            globalFilterDTO.getSegments(), 
+            globalFilterDTO.getRegions());
+        
+        // Your implementation here
+        return new ArrayList<>(); // Replace with actual data
+    }
+}
+
+// Alternative: Separate Cache Service (Recommended)
+@Service
+public class ProductDataCacheService {
+    
+    private static final Logger logger = LoggerFactory.getLogger(ProductDataCacheService.class);
+    
+    @Autowired
+    private ProductDataRepository repository; // Your data source
+    
+    @Cacheable(value = "productServicesData", keyGenerator = "customKeyGenerator")
+    public List<ParentDataRecordDTO> getProductServicesData(GlobalFilterDTO globalFilterDTO) {
+        logger.info("ProductDataCacheService: Fetching data from source - CACHE MISS");
+        return repository.findProductData(globalFilterDTO);
+    }
+    
+    @CacheEvict(value = "productServicesData", allEntries = true)
+    public void clearCache() {
+        logger.info("ProductDataCacheService: Cache cleared");
+    }
+    
+    @CacheEvict(value = "productServicesData", keyGenerator = "customKeyGenerator")
+    public void evictSpecificCache(GlobalFilterDTO globalFilterDTO) {
+        logger.info("ProductDataCacheService: Evicted cache for specific filter");
+    }
+}
+
+// Controller to test caching
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+    
+    @Autowired
+    private ProductServicesServiceImpl productService;
+    
+    @Autowired
+    private ProductDataCacheService cacheService;
+    
+    // Endpoint using Option 1 (caching ResponseEntity)
+    @PostMapping("/optimization")
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getOptimization(
+            @RequestBody GlobalFilterDTO filter) {
+        return productService.getProductServicesOptimization(filter);
+    }
+    
+    // Endpoint using Option 2 (caching data only)
+    @PostMapping("/optimization-v2")
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getOptimizationV2(
+            @RequestBody GlobalFilterDTO filter) {
+        return productService.getProductServicesOptimizationV2(filter);
+    }
+    
+    // Endpoint using separate cache service
+    @PostMapping("/data")
+    public ResponseEntity<ResponseData<List<ParentDataRecordDTO>>> getData(
+            @RequestBody GlobalFilterDTO filter) {
+        
+        List<ParentDataRecordDTO> data = cacheService.getProductServicesData(filter);
+        
+        ResponseData<List<ParentDataRecordDTO>> responseData = new ResponseData<>();
+        responseData.setResponseCode("200");
+        responseData.setResponseMessage("SUCCESS");
+        responseData.setResponseBody(data);
+        
+        return ResponseEntity.ok(responseData);
+    }
+    
+    // Utility endpoints for cache management
+    @DeleteMapping("/cache/clear")
+    public ResponseEntity<String> clearCache() {
+        cacheService.clearCache();
+        return ResponseEntity.ok("Cache cleared");
+    }
+}
+
+// Make sure your DTOs are properly configured
+@JsonIgnoreProperties(ignoreUnknown = true)
+public class ResponseData<T> implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    private String responseCode;
+    private String responseMessage;
+    private T responseBody;
+    
+    // Default constructor for Jackson
+    public ResponseData() {}
+    
+    // Getters and setters
+    public String getResponseCode() { return responseCode; }
+    public void setResponseCode(String responseCode) { this.responseCode = responseCode; }
+    
+    public String getResponseMessage() { return responseMessage; }
+    public void setResponseMessage(String responseMessage) { this.responseMessage = responseMessage; }
+    
+    public T getResponseBody() { return responseBody; }
+    public void setResponseBody(T responseBody) { this.responseBody = responseBody; }
+}
