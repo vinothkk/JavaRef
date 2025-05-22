@@ -1,0 +1,74 @@
+# ===========================================
+# LOCAL REDIS CONFIGURATION EXPLANATION
+# ===========================================
+
+# Basic Connection Settings
+spring.redis.host=localhost          # Redis server hostname/IP address
+spring.redis.port=6379              # Redis server port (default is 6379)
+spring.redis.timeout=60000          # Connection timeout in milliseconds (60 seconds)
+                                    # How long to wait before giving up on connection
+
+# Connection Pool Settings (Jedis Client)
+spring.redis.jedis.pool.max-active=8    # Maximum number of connections in the pool
+                                        # Higher = more concurrent operations, more memory
+spring.redis.jedis.pool.max-wait=-1     # Maximum time to wait for connection from pool
+                                        # -1 = wait indefinitely, 0 = don't wait, >0 = wait in ms
+spring.redis.jedis.pool.max-idle=8      # Maximum number of idle connections in pool
+                                        # Connections ready to use but not currently used
+spring.redis.jedis.pool.min-idle=0      # Minimum number of idle connections to maintain
+                                        # 0 = no minimum, connections created as needed
+
+# Logging Configuration
+logging.level.org.springframework.cache=DEBUG  # Enable detailed cache operation logs
+                                              # Shows cache hits, misses, puts, evictions
+
+# ===========================================
+# AWS ELASTICACHE CONFIGURATION
+# ===========================================
+
+# For AWS ElastiCache Redis Cluster (PRODUCTION)
+spring.redis.host=your-cluster-endpoint.cache.amazonaws.com
+spring.redis.port=6379
+spring.redis.timeout=10000           # Shorter timeout for cloud (10 seconds)
+# Note: No password needed if using VPC security groups
+
+# For ElastiCache with SSL/TLS (if enabled)
+spring.redis.ssl=true
+spring.redis.host=your-cluster-endpoint.cache.amazonaws.com
+spring.redis.port=6380              # SSL port is usually 6380
+
+# Connection Pool for Production (higher values)
+spring.redis.jedis.pool.max-active=20    # More connections for production load
+spring.redis.jedis.pool.max-wait=3000    # Wait max 3 seconds for connection
+spring.redis.jedis.pool.max-idle=10      # Keep more idle connections ready
+spring.redis.jedis.pool.min-idle=2       # Always keep 2 connections ready
+
+# ===========================================
+# ENVIRONMENT-SPECIFIC CONFIGURATION
+# ===========================================
+
+# application-dev.properties (Development/Testing)
+spring.redis.host=your-dev-cluster.cache.amazonaws.com
+spring.redis.port=6379
+spring.redis.timeout=10000
+spring.redis.jedis.pool.max-active=5
+spring.redis.jedis.pool.max-wait=2000
+spring.redis.jedis.pool.max-idle=3
+spring.redis.jedis.pool.min-idle=1
+logging.level.org.springframework.cache=DEBUG
+
+# application-prod.properties (Production)
+spring.redis.host=your-prod-cluster.cache.amazonaws.com
+spring.redis.port=6379
+spring.redis.timeout=5000            # Faster timeout for production
+spring.redis.jedis.pool.max-active=50   # Higher for production load
+spring.redis.jedis.pool.max-wait=1000   # Don't wait too long
+spring.redis.jedis.pool.max-idle=20
+spring.redis.jedis.pool.min-idle=5
+logging.level.org.springframework.cache=WARN  # Less logging in production
+
+# ===========================================
+# CLUSTER CONFIGURATION (if using cluster mode)
+# ===========================================
+spring.redis.cluster.nodes=node1:6379,node2:6379,node3:6379
+spring.redis.cluster.max-redirects=3
