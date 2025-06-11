@@ -1,0 +1,625 @@
+@RestController
+@RequestMapping("/api/redis")
+@Slf4j
+public class RedisKeysController {
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    // Method 1: Get all keys (USE WITH CAUTION in production)
+    @GetMapping("/keys")
+    public ResponseEntity<List<String>> getAllKeys() {
+        try {
+            Set<String> keys = redisTemplate.keys("*");
+            List<String> keysList = keys != null ? new ArrayList<>(keys) : new ArrayList<>();
+            
+            log.info("Retrieved {} keys from Redis", keysList.size());
+            return ResponseEntity.ok(keysList);
+            
+        } catch (Exception e) {
+            log.error("Error retrieving keys from Redis", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ArrayList<>());
+        }
+    }
+
+    // Method 2: Get keys with pattern
+    @GetMapping("/keys/pattern")
+    public ResponseEntity<List<String>> getKeysByPattern(@RequestParam String pattern) {
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            List<String> keysList = keys != null ? new ArrayList<>(keys) : new ArrayList<>();
+            
+            log.info("Retrieved {} keys with pattern '{}' from Redis", keysList.size(), pattern);
+            return ResponseEntity.ok(keysList);
+            
+        } catch (Exception e) {
+            log.error("Error retrieving keys with pattern '{}' from Redis", pattern, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ArrayList<>());
+        }
+    }
+
+    // Method 3: Get keys with pagination using SCAN (Recommended for production)
+    @GetMapping("/keys/scan")
+    public ResponseEntity<Map<String, Object>> scanKeys(
+            @RequestParam(defaultValue = "0") String cursor,
+            @RequestParam(defaultValue = "*") String pattern,
+            @RequestParam(defaultValue = "100") int count) {
+        
+        try {
+            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            
+            ScanOptions scanOptions = ScanOptions.scanOptions()
+                    .match(pattern)
+                    .count(count)
+                    .build();
+                    
+            Cursor<byte[]> scanCursor = connection.scan(ScanOptions.scanOptions()
+                    .match(pattern)
+                    .count(count)
+                    .build());
+            
+            List<String> keys = new ArrayList<>();
+            while (scanCursor.hasNext()) {
+                keys.add(new String(scanCursor.next()));
+            }
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("keys", keys);
+            result.put("cursor", "0"); // Redis cluster doesn't maintain cursor state
+            result.put("count", keys.size());
+            result.put("pattern", pattern);
+            
+            connection.close();
+            
+            log.info("SCAN retrieved {} keys with pattern '{}'", keys.size(), pattern);
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error scanning keys with pattern '{}'", pattern, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to scan keys"));
+        }
+    }
+
+    // Method 4: Get keys by prefix (common use case)
+    @GetMapping("/keys/prefix/{prefix}")
+    public ResponseEntity<List<String>> getKeysByPrefix(@PathVariable String prefix) {
+        try {
+            String pattern = prefix + "*";
+            Set<String> keys = redisTemplate.keys(pattern);
+            List<String> keysList = keys != null ? new ArrayList<>(keys) : new ArrayList<>();
+            
+            log.info("Retrieved {} keys with prefix '{}' from Redis", keysList.size(), prefix);
+            return ResponseEntity.ok(keysList);
+            
+        } catch (Exception e) {
+            log.error("Error retrieving keys with prefix '{}' from Redis", prefix, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ArrayList<>());
+        }
+    }
+
+    // Method 5: Get key details with values
+    @GetMapping("/keys/details")
+    public ResponseEntity<List<Map<String, Object>>> getKeysWithDetails(
+            @RequestParam(defaultValue = "*") String pattern,
+            @RequestParam(defaultValue = "50") int limit) {
+        
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            List<Map<String, Object>> keyDetails = new ArrayList<>();
+            
+            if (keys != null) {
+                int count = 0;
+                for (String key : keys) {
+                    if (count >= limit) break;
+                    
+                    Map<String, Object> details = new HashMap<>();
+                    details.put("key", key);
+                    details.put("type", getKeyType(key));
+                    details.put("ttl", redisTemplate.getExpire(key));
+                    
+                    // Get value based on type (be careful with large values)
+                    String type = getKeyType(key);
+                    if ("string".equals(type)) {
+                        Object value = redisTemplate.opsForValue().get(key);
+                        details.put("value", value);
+                    } else {
+                        details.put("value", "Complex type - use specific endpoint");
+                    }
+                    
+                    keyDetails.add(details);
+                    count++;
+                }
+            }
+            
+            log.info("Retrieved details for {} keys", keyDetails.size());
+            return ResponseEntity.ok(keyDetails);
+            
+        } catch (Exception e) {
+            log.error("Error retrieving key details", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ArrayList<>());
+        }
+    }
+
+    // Method 6: Get specific key value
+    @GetMapping("/key/{key}")
+    public ResponseEntity<Map<String, Object>> getKeyValue(@PathVariable String key) {
+        try {
+            if (!redisTemplate.hasKey(key)) {
+                return ResponseEntity.notFound().build();
+            }
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("key", key);
+            result.put("exists", true);
+            result.put("type", getKeyType(key));
+            result.put("ttl", redisTemplate.getExpire(key));
+            
+            String type = getKeyType(key);
+            switch (type) {
+                case "string":
+                    result.put("value", redisTemplate.opsForValue().get(key));
+                    break;
+                case "list":
+                    result.put("value", redisTemplate.opsForList().range(key, 0, -1));
+                    result.put("length", redisTemplate.opsForList().size(key));
+                    break;
+                case "set":
+                    result.put("value", redisTemplate.opsForSet().members(key));
+                    result.put("size", redisTemplate.opsForSet().size(key));
+                    break;
+                case "hash":
+                    result.put("value", redisTemplate.opsForHash().entries(key));
+                    result.put("size", redisTemplate.opsForHash().size(key));
+                    break;
+                case "zset":
+                    result.put("value", redisTemplate.opsForZSet().range(key, 0, -1));
+                    result.put("size", redisTemplate.opsForZSet().size(key));
+                    break;
+                default:
+                    result.put("value", "Unknown type");
+            }
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error retrieving key value for '{}'", key, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to retrieve key value"));
+        }
+    }
+
+    // Method 7: Search keys (supports wildcards)
+    @GetMapping("/keys/search")
+    public ResponseEntity<Map<String, Object>> searchKeys(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        
+        try {
+            String pattern = "*" + query + "*"; // Add wildcards
+            Set<String> allKeys = redisTemplate.keys(pattern);
+            List<String> keysList = allKeys != null ? new ArrayList<>(allKeys) : new ArrayList<>();
+            
+            // Implement pagination
+            int start = page * size;
+            int end = Math.min(start + size, keysList.size());
+            List<String> paginatedKeys = keysList.subList(start, end);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("keys", paginatedKeys);
+            result.put("totalKeys", keysList.size());
+            result.put("page", page);
+            result.put("size", size);
+            result.put("totalPages", (int) Math.ceil((double) keysList.size() / size));
+            result.put("query", query);
+            result.put("pattern", pattern);
+            
+            log.info("Search for '{}' returned {} keys", query, keysList.size());
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error searching keys with query '{}'", query, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to search keys"));
+        }
+    }
+
+    // Method 8: Get Redis info
+    @GetMapping("/info")
+    public ResponseEntity<Map<String, Object>> getRedisInfo() {
+        try {
+            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            Properties info = connection.info();
+            connection.close();
+            
+            Map<String, Object> result = new HashMap<>();
+            info.forEach((key, value) -> result.put(key.toString(), value.toString()));
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error retrieving Redis info", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to retrieve Redis info"));
+        }
+    }
+
+    // Helper method to get key type
+    private String getKeyType(String key) {
+        try {
+            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            DataType type = connection.type(key.getBytes());
+            connection.close();
+            return type.name().toLowerCase();
+        } catch (Exception e) {
+            log.warn("Could not determine type for key '{}'", key);
+            return "unknown";
+        }
+    }
+
+    // Method 9: Delete keys (bonus)
+    @DeleteMapping("/keys")
+    public ResponseEntity<Map<String, Object>> deleteKeys(@RequestParam String pattern) {
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            Long deletedCount = 0L;
+            
+            if (keys != null && !keys.isEmpty()) {
+                deletedCount = redisTemplate.delete(keys);
+            }
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("pattern", pattern);
+            result.put("keysFound", keys != null ? keys.size() : 0);
+            result.put("keysDeleted", deletedCount);thrugh 
+            
+            log.info("Deleted {} keys with pattern '{}'", deletedCount, pattern);
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error deleting keys with pattern '{}'", pattern, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to delete keys"));
+        }
+    }
+}
+
+===================
+
+
+@Service
+@Slf4j
+public class RedisKeysService {
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    /**
+     * Get all keys matching a pattern
+     * WARNING: Use with caution in production with large datasets
+     */
+    public List<String> getKeys(String pattern) {
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            return keys != null ? new ArrayList<>(keys) : new ArrayList<>();
+        } catch (Exception e) {
+            log.error("Error getting keys with pattern: {}", pattern, e);
+            throw new RuntimeException("Failed to retrieve keys", e);
+        }
+    }
+
+    /**
+     * Scan keys with pagination (Production-safe)
+     */
+    public ScanResult scanKeys(String pattern, int count) {
+        try {
+            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            
+            ScanOptions scanOptions = ScanOptions.scanOptions()
+                    .match(pattern)
+                    .count(count)
+                    .build();
+                    
+            Cursor<byte[]> cursor = connection.scan(scanOptions);
+            
+            List<String> keys = new ArrayList<>();
+            while (cursor.hasNext() && keys.size() < count) {
+                keys.add(new String(cursor.next()));
+            }
+            
+            connection.close();
+            
+            return new ScanResult(keys, cursor.getCursorId(), keys.size());
+            
+        } catch (Exception e) {
+            log.error("Error scanning keys with pattern: {}", pattern, e);
+            throw new RuntimeException("Failed to scan keys", e);
+        }
+    }
+
+    /**
+     * Get key details including type, TTL, and value
+     */
+    public KeyDetails getKeyDetails(String key) {
+        try {
+            if (!redisTemplate.hasKey(key)) {
+                return null;
+            }
+
+            KeyDetails details = new KeyDetails();
+            details.setKey(key);
+            details.setExists(true);
+            details.setType(getKeyType(key));
+            details.setTtl(redisTemplate.getExpire(key));
+            details.setValue(getKeyValue(key, details.getType()));
+            
+            return details;
+            
+        } catch (Exception e) {
+            log.error("Error getting key details for: {}", key, e);
+            throw new RuntimeException("Failed to get key details", e);
+        }
+    }
+
+    /**
+     * Search keys with pagination
+     */
+    public PagedResult<String> searchKeys(String query, int page, int size) {
+        try {
+            String pattern = "*" + query + "*";
+            List<String> allKeys = getKeys(pattern);
+            
+            int start = page * size;
+            int end = Math.min(start + size, allKeys.size());
+            List<String> paginatedKeys = allKeys.subList(Math.max(0, start), end);
+            
+            return new PagedResult<>(
+                paginatedKeys,
+                page,
+                size,
+                allKeys.size(),
+                (int) Math.ceil((double) allKeys.size() / size)
+            );
+            
+        } catch (Exception e) {
+            log.error("Error searching keys with query: {}", query, e);
+            throw new RuntimeException("Failed to search keys", e);
+        }
+    }
+
+    /**
+     * Get Redis connection info
+     */
+    public Map<String, String> getRedisInfo() {
+        try {
+            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            Properties info = connection.info();
+            connection.close();
+            
+            Map<String, String> result = new HashMap<>();
+            info.forEach((key, value) -> result.put(key.toString(), value.toString()));
+            
+            return result;
+            
+        } catch (Exception e) {
+            log.error("Error getting Redis info", e);
+            throw new RuntimeException("Failed to get Redis info", e);
+        }
+    }
+
+    /**
+     * Delete keys by pattern
+     */
+    public long deleteKeys(String pattern) {
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            if (keys != null && !keys.isEmpty()) {
+                return redisTemplate.delete(keys);
+            }
+            return 0;
+        } catch (Exception e) {
+            log.error("Error deleting keys with pattern: {}", pattern, e);
+            throw new RuntimeException("Failed to delete keys", e);
+        }
+    }
+
+    // Helper methods
+    private String getKeyType(String key) {
+        try {
+            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
+            DataType type = connection.type(key.getBytes());
+            connection.close();
+            return type.name().toLowerCase();
+        } catch (Exception e) {
+            log.warn("Could not determine type for key: {}", key);
+            return "unknown";
+        }
+    }
+
+    private Object getKeyValue(String key, String type) {
+        try {
+            switch (type.toLowerCase()) {
+                case "string":
+                    return redisTemplate.opsForValue().get(key);
+                case "list":
+                    return redisTemplate.opsForList().range(key, 0, -1);
+                case "set":
+                    return redisTemplate.opsForSet().members(key);
+                case "hash":
+                    return redisTemplate.opsForHash().entries(key);
+                case "zset":
+                    return redisTemplate.opsForZSet().rangeWithScores(key, 0, -1);
+                default:
+                    return "Complex type - use specific operations";
+            }
+        } catch (Exception e) {
+            log.warn("Could not retrieve value for key: {}", key);
+            return "Error retrieving value";
+        }
+    }
+
+    // Data classes
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class ScanResult {
+        private List<String> keys;
+        private long cursor;
+        private int count;
+    }
+
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class KeyDetails {
+        private String key;
+        private boolean exists;
+        private String type;
+        private long ttl;
+        private Object value;
+    }
+
+    @Data
+    @AllArgsConstructor
+    @NoArgsConstructor
+    public static class PagedResult<T> {
+        private List<T> content;
+        private int page;
+        private int size;
+        private long totalElements;
+        private int totalPages;
+    }
+}
+
+
+
+
+
+@Component
+public class RedisHealthCheck {
+    
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    @PostConstruct
+    public void testConnection() {
+        try {
+            String result = redisTemplate.getConnectionFactory()
+                .getConnection().ping();
+            log.info("Redis connection successful: {}", result);
+        } catch (Exception e) {
+            log.error("Redis connection failed: {}", e.getMessage());
+        }
+    }
+}
+Key Changes Made:
+1. Username Configuration
+
+Added @Value("${spring.redis.username:default}") to configure the Redis username
+AWS ElastiCache typically uses "default" as the username for Redis 6.0+ with RBAC enabled
+
+2. Password Configuration
+
+Made password configurable via @Value("${spring.redis.password}")
+Added both username and password to the cluster configuration using setUsername() and setPassword()
+
+3. Enhanced RedisTemplate Configuration
+
+Added hash serializers for better compatibility
+Added afterPropertiesSet() call
+
+Application Properties Setup:
+Add these properties to your application.properties or application.yml:
+application.properties:
+
+@Configuration
+@EnableCaching
+public class RedisConfig {
+
+    @Value("${spring.redis.port:6379}")
+    private int redisPort;
+
+    @Value("${spring.redis.cluster.nodes}")
+    private String clusterNodes;
+
+    @Value("${spring.redis.ssl:false}")
+    private boolean enableSsl;
+
+    // Add username configuration
+    @Value("${spring.redis.username:default}")
+    private String redisUsername;
+
+    // Make password configurable
+    @Value("${spring.redis.password}")
+    private String redisPassword;
+
+    @Bean
+    public KeyGenerator customKeyGenerator() {
+        return new CustomKeyGenerator();
+    }
+
+    @Bean
+    public RedisConnectionFactory redisConnectionFactory() {
+        List<String> nodes = Arrays.asList(clusterNodes.split(","));
+        RedisClusterConfiguration clusterConfig = new RedisClusterConfiguration(nodes);
+        
+        // Set both username and password for AWS ElastiCache
+        clusterConfig.setUsername(redisUsername);
+        clusterConfig.setPassword(RedisPassword.of(redisPassword));
+        
+        // Configure SSL and client settings
+        LettuceClientConfiguration.LettuceClientConfigurationBuilder clientConfigBuilder =
+                LettuceClientConfiguration.builder();
+
+        if (enableSsl) {
+            clientConfigBuilder.useSsl()
+                    .disablePeerVerification()
+                    .and();
+        }
+
+        LettuceClientConfiguration clientConfig = clientConfigBuilder
+                .commandTimeout(Duration.ofMillis(10000))
+                .shutdownTimeout(Duration.ofMillis(100))
+                .build();
+                
+        return new LettuceConnectionFactory(clusterConfig, clientConfig);
+    }
+
+    @Bean
+    public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration cacheConfig = RedisCacheConfiguration.defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(30))
+                .serializeKeysWith(RedisSerializationContext.SerializationPair
+                        .fromSerializer(new StringRedisSerializer()))
+                .serializeValuesWith(RedisSerializationContext.SerializationPair
+                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        return RedisCacheManager.builder(connectionFactory)
+                .cacheDefaults(cacheConfig)
+                .build();
+    }
+
+    @Bean
+    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.setHashKeySerializer(new StringRedisSerializer());
+        template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.afterPropertiesSet();
+        return template;
+    }
+}
+
+
