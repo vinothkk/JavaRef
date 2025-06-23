@@ -1,0 +1,180 @@
+1
+{
+  accessorKey: 'opportunityType',
+  header: 'Type',
+  filterSelectOptions: [
+    'New Business',
+    'Organic Growth',
+    'Organic Loss',
+    'Fee Negotiation',
+    'Under Review',
+    'Rebid',
+  ],
+  size: 120,
+  maxSize: 120,
+  filterVariant: 'multi-select', // Use built-in multi-select
+  enableColumnFilter: true,
+  filterFn: 'arrIncludesSome',
+}
+
+
+2
+{
+  accessorKey: 'opportunityType',
+  header: 'Type',
+  filterSelectOptions: [
+    'New Business',
+    'Organic Growth',
+    'Organic Loss',
+    'Fee Negotiation',
+    'Under Review',
+    'Rebid',
+  ],
+  size: 120,
+  maxSize: 120,
+  enableColumnFilter: true,
+  filterFn: 'arrIncludesSome',
+  filterVariant: 'custom',
+  muiFilterTextFieldProps: {
+    placeholder: 'Filter types...',
+    // Custom helper text to override default tooltip
+    helperText: (filterValue) => {
+      if (filterValue && filterValue.length > 0) {
+        return `Filtering by Type - Includes "${filterValue.join('", "')}"`;
+      }
+      return '';
+    }
+  },
+  Filter: ({ column }) => {
+    return (
+      <SelectFilter
+        id='all-client-list'
+        fullWidth={true}
+        limitTags={2}
+        maxBadgeTextLength={12}
+        onSelectionChange={(items) => {
+          column.setFilterValue(items);
+        }}
+        data={[
+          'New Business',
+          'Organic Growth',
+          'Organic Loss',
+          'Fee Negotiation',
+          'Under Review',
+          'Rebid',
+        ]}
+        loading={false}
+        label={'Types'}
+        selectedValues={column.getFilterValue()}
+        width={330}
+      />
+    );
+  }
+}
+33
+<MaterialReactTable
+  columns={columns}
+  data={filteredData}
+  columnFilterDisplayMode={'popover'}
+  initialState={{
+    columnFilters: [],
+  }}
+  localization={{
+    // Override filter descriptions
+    filterByColumn: (columnName) => `Filter by ${columnName}`,
+    // You can customize other filter-related text here
+  }}
+  // Custom function to format filter chip tooltips
+  renderColumnFilterModeMenuItems={({ column, onSelectFilterMode }) => [
+    <MenuItem
+      key="arrIncludesSome"
+      onClick={() => onSelectFilterMode('arrIncludesSome')}
+    >
+      Contains Any
+    </MenuItem>
+  ]}
+  density="compact"
+  enableColumnFilters={true}
+  enableFilters={true}
+  enableFullScreenToggle={false}
+  enablePagination={false}
+  enableTopToolbar={false}
+  enableBottomToolbar={false}
+  enableRowVirtualization={true}
+  enableColumnVirtualization={true}
+  rowVirtualizerOptions={{
+    count: filteredData?.length || 0,
+    overscan: 10,
+    estimateSize: () => 40,
+  }}
+  rowVirtualizerInstanceRef={rowVirtualizerInstanceRef}
+  tableInstaceRef={tableInstaceRef}
+  state={{
+    columnFilters,
+  }}
+  onColumnFiltersChange={setColumnFilters}
+  muiTableContainerProps={{
+    sx: {
+      '--Paper-shadow': 'none !important',
+      boxShadow: 'none !important',
+      overflowX: 'hidden',
+      minHeight: '200px',
+      maxHeight: '420px',
+      overflowY: 'auto',
+      paddingRight: '8px',
+      ...sxMuiTableContainerProps,
+    },
+  }}
+  muiPaperProps={{
+    elevation: 0,
+    sx: {
+      '--paper-shadow': 'none !important',
+      boxShadow: 'none',
+    },
+  }}
+  muiTableBodyProps={{
+    sx: {
+      minHeight: '298px',
+    },
+  }}
+  renderEmptyRowsFallback={() => <EmptyRowsFallback isLoading={isPipelineDataLoading} />}
+/>
+
+4
+/* Add this CSS to hide the "or" text in filter tooltips */
+.MuiChip-label {
+  /* Hide the entire tooltip if needed */
+  display: none;
+}
+
+/* Or more specifically target the filter tooltip */
+.MuiTooltip-tooltip:has-text("or") {
+  display: none;
+}
+
+/* Alternative: Replace "or" with comma using CSS */
+.MuiChip-label::before {
+  content: attr(title);
+  /* Use JavaScript to replace 'or' with ',' */
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
